@@ -83,7 +83,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- DATABASE SETUP & SELF-SEEDING ITEMS ---
+# --- DATABASE SETUP & MIGRATION FOR PRICING ---
 def init_db():
   conn = sqlite3.connect("inventory.db", check_same_thread=False)
   cursor = conn.cursor()
@@ -92,9 +92,18 @@ def init_db():
         CREATE TABLE IF NOT EXISTS items (
             item_id TEXT PRIMARY KEY,
             item_name TEXT NOT NULL,
-            opening_stock INTEGER DEFAULT 0
+            opening_stock INTEGER DEFAULT 0,
+            price REAL DEFAULT 0.0
         )
     """)
+
+  # Ensure price column exists if upgrading an older DB
+  try:
+    cursor.execute("ALTER TABLE items ADD COLUMN price REAL DEFAULT 0.0")
+    conn.commit()
+  except sqlite3.OperationalError:
+    pass  # Column already exists
+
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS stock_in (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,19 +126,19 @@ def init_db():
     """)
   conn.commit()
 
-  # Seed default motor parts catalog if empty (No Excel needed!)
+  # Seed default motor parts catalog with prices if empty
   cursor.execute("SELECT COUNT(*) FROM items")
   if cursor.fetchone()[0] == 0:
     default_parts = [
-        ("MP-001", "V-Belt Standard", 0),
-        ("MP-002", "Heavy Duty Bearing", 0),
-        ("MP-003", "Brake Pad Set", 0),
-        ("MP-004", "Oil Filter Premium", 0),
-        ("MP-005", "Spark Plug Platinum", 0),
+        ("MP-001", "V-Belt Standard", 0, 450.0),
+        ("MP-002", "Heavy Duty Bearing", 0, 1200.0),
+        ("MP-003", "Brake Pad Set", 0, 2500.0),
+        ("MP-004", "Oil Filter Premium", 0, 350.0),
+        ("MP-005", "Spark Plug Platinum", 0, 600.0),
     ]
     cursor.executemany(
-        "INSERT OR IGNORE INTO items (item_id, item_name, opening_stock) VALUES"
-        " (?, ?, ?)",
+        "INSERT OR IGNORE INTO items (item_id, item_name, opening_stock, price)"
+        " VALUES (?, ?, ?, ?)",
         default_parts,
     )
     conn.commit()
@@ -144,7 +153,7 @@ st.markdown("""
     <div class="zoho-header">
         <div>
             <h1>⚙️ Zoho-Style Inventory Management Suite</h1>
-            <p>Automated Motor Parts Stock & Sales Operations</p>
+            <p>Automated Motor Parts Stock, Pricing & Sales Operations</p>
         </div>
         <div>
             <span style="background: #2D3748; padding: 6px 12px; border-radius: 4px; font-size: 0.85rem; color: #E2E8F0;">🟢 Live Database Connected</span>
@@ -153,7 +162,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- FETCH DATA & AGGREGATE VALUES CORRECTLY ---
-df_items = pd.read_sql("SELECT item_id, item_name, opening_stock FROM items", conn)
+df_items = pd.read_sql(
+    "SELECT item_id, item_name, opening_stock, price FROM items", conn
+)
 df_stock_in = pd.read_sql("SELECT item_id, quantity FROM stock_in", conn)
 df_sales = pd.read_sql("SELECT item_id, quantity_sold FROM sales", conn)
 
@@ -176,6 +187,7 @@ df_dash.rename(columns={"quantity": "Total Stock In"}, inplace=True)
 df_dash["Current Balance"] = (
     df_dash["opening_stock"] + df_dash["Total Stock In"]
 ) - df_dash["quantity_sold"]
+df_dash["Total Value"] = df_dash["Current Balance"] * df_dash["price"]
 
 # --- TOP KPIS (ZOHO METRICS ROW) ---
 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
@@ -199,36 +211,53 @@ with col_m3:
   )
 with col_m4:
   st.markdown(
-      f"""<div class="metric-card"><div class="metric-title">Net Balance</div><div"
-      f" class="metric-value">{int(df_dash['Current Balance'].sum())}</div></div>""",
+      f"""<div class="metric-card"><div class="metric-title">Inventory Value</div><div"
+      f" class="metric-value">৳{df_dash['Total Value'].sum():,.2f}</div></div>""",
       unsafe_allow_html=True,
   )
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 # --- TABS FOR MODULES ---
-tab_dash, tab_sales, tab_stockin = st.tabs(
-    ["📊 Inventory Dashboard", "🛒 Sales Operations", "📦 Stock-In Operations"]
-)
+tab_dash, tab_sales, tab_stockin, tab_admin = st.tabs([
+    "📊 Inventory Dashboard",
+    "🛒 Sales Operations",
+    "📦 Stock-In Operations",
+    "🔐 Admin Panel",
+])
 
-items_df = pd.read_sql("SELECT item_id, item_name FROM items", conn)
+items_df = pd.read_sql("SELECT item_id, item_name, price FROM items", conn)
 item_options = [
-    f"{row['item_id']} - {row['item_name']}" for _, row in items_df.iterrows()
+    f"{row['item_id']} - {row['item_name']} (৳{row['price']})"
+    for _, row in items_df.iterrows()
 ]
 
 with tab_dash:
   st.markdown(
-      '<div class="section-title">Live Inventory Status & Stock Balance</div>',
+      '<div class="section-title">Live Inventory Status, Stock Balance & Pricing</div>',
       unsafe_allow_html=True,
   )
-  df_display = df_dash.copy()
+  df_display = df_dash[
+      [
+          "item_id",
+          "item_name",
+          "price",
+          "opening_stock",
+          "Total Stock In",
+          "quantity_sold",
+          "Current Balance",
+          "Total Value",
+      ]
+  ].copy()
   df_display.columns = [
       "Item ID",
       "Item Name",
+      "Unit Price (৳)",
       "Opening Stock",
       "Total Stock In",
       "Total Sold",
       "Current Balance",
+      "Total Stock Value (৳)",
   ]
   st.dataframe(df_display, width="stretch", hide_index=True)
 
@@ -296,6 +325,9 @@ with tab_sales:
         else pd.DataFrame()
     )
     if not df_sal_log.empty:
+      df_sal_log["Total Amount (৳)"] = (
+          df_sal_log["quantity_sold"] * df_sal_log["price"]
+      )
       df_sal_log = df_sal_log[
           [
               "date",
@@ -303,6 +335,8 @@ with tab_sales:
               "item_id",
               "item_name",
               "quantity_sold",
+              "price",
+              "Total Amount (৳)",
               "customer",
           ]
       ]
@@ -312,6 +346,8 @@ with tab_sales:
           "ID",
           "Item Name",
           "Qty",
+          "Unit Price",
+          "Total (৳)",
           "Customer",
       ]
       st.dataframe(df_sal_log, width="stretch", hide_index=True)
@@ -373,3 +409,42 @@ with tab_stockin:
       st.dataframe(df_stk_log, width="stretch", hide_index=True)
     else:
       st.info("No stock-in records yet.")
+
+with tab_admin:
+  st.markdown(
+      '<div class="section-title">🔐 Restricted Admin Panel</div>',
+      unsafe_allow_html=True,
+  )
+  admin_pass = st.text_input("Enter Admin Password", type="password")
+
+  # Default admin password is set to 'admin123' (you can change it here)
+  if admin_pass == "admin123":
+    st.success("🔓 Admin Authentication Successful")
+
+    admin_sub_tab1, admin_sub_tab2, admin_sub_tab3 = st.tabs([
+        "➕ Add New Part",
+        "✏️ Edit Price & Stock",
+        "🗑️ Delete Item",
+    ])
+
+    with admin_sub_tab1:
+      st.markdown("### Add a New Part to Catalog")
+      with st.form("add_new_part_form"):
+        new_id = st.text_input("Item ID (e.g., MP-006)")
+        new_name = st.text_input("Item Name (e.g., Alternator Belt)")
+        new_opening = st.number_input(
+            "Initial Opening Stock", min_value=0, step=1, value=0
+        )
+        new_price = st.number_input(
+            "Unit Price (৳)", min_value=0.0, step=10.0, value=100.0
+        )
+        add_submitted = st.form_submit_button("Add Part to Catalog")
+
+        if add_submitted:
+          if not new_id or not new_name:
+            st.error("❌ Item ID and Name are required.")
+          else:
+            try:
+              cur = conn.cursor()
+              cur.execute(
+                  """
