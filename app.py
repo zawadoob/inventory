@@ -117,7 +117,7 @@ def init_db():
     """)
   conn.commit()
 
-  excel_path = "Motor_Parts_Multi_Item_Inventory.xlsx"
+  excel_path = "inventory_template.xlsx"
 
   # Populate items if empty
   cursor.execute("SELECT COUNT(*) FROM items")
