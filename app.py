@@ -14,7 +14,6 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    /* iOS Global Theme */
     .main {
         background-color: #F2F2F7;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -26,11 +25,11 @@ st.markdown("""
         backdrop-filter: blur(20px) saturate(180%) !important;
         -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
         border-right: 1px solid rgba(209, 213, 219, 0.4);
-        width: 50vw !important; /* Half the frame width on mobile/tablet */
+        width: 50vw !important;
         max-width: 320px;
     }
 
-    /* App Header Card (iOS Card Style) */
+    /* App Header Card */
     .app-header {
         background: rgba(255, 255, 255, 0.85);
         backdrop-filter: blur(10px);
@@ -119,7 +118,6 @@ st.markdown("""
         box-shadow: 0 6px 16px rgba(0, 122, 255, 0.35);
     }
     
-    /* Input Fields Border Radius (iOS Style) */
     input, select, textarea {
         border-radius: 10px !important;
     }
@@ -242,8 +240,8 @@ df_dash["Current Balance"] = (
 ) - df_dash["quantity_sold"]
 df_dash["Total Value"] = df_dash["Current Balance"] * df_dash["price"]
 
-# --- RESPONSIVE TOP KPIS ---
-col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+# --- STREAMLINED MAIN MENU KPIS (Only Total Products, Stock In, and Sold) ---
+col_m1, col_m2, col_m3 = st.columns(3)
 with col_m1:
   st.markdown(
       f"""<div class="metric-card"><div class="metric-title">Total Products</div><div"
@@ -262,12 +260,6 @@ with col_m3:
       f" class="metric-value">{int(df_dash['quantity_sold'].sum())}</div></div>""",
       unsafe_allow_html=True,
   )
-with col_m4:
-  st.markdown(
-      f"""<div class="metric-card"><div class="metric-title">Inventory Value</div><div"
-      f" class="metric-value">৳{df_dash['Total Value'].sum():,.2f}</div></div>""",
-      unsafe_allow_html=True,
-  )
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -280,31 +272,27 @@ item_options = [
 # --- MODULE ROUTING ---
 if app_mode == "📊 Inventory Dashboard":
   st.markdown(
-      '<div class="section-title">Live Inventory Status, Stock Balance &'
-      " Pricing</div>",
+      '<div class="section-title">Live Inventory Status & Stock Balance</div>',
       unsafe_allow_html=True,
   )
+  # Clean public dashboard omitting pricing valuation metrics
   df_display = df_dash[
       [
           "item_id",
           "item_name",
-          "price",
           "opening_stock",
           "Total Stock In",
           "quantity_sold",
           "Current Balance",
-          "Total Value",
       ]
   ].copy()
   df_display.columns = [
       "Item ID",
       "Item Name",
-      "Unit Price (৳)",
       "Opening Stock",
       "Total Stock In",
       "Total Sold",
       "Current Balance",
-      "Total Stock Value (৳)",
   ]
   st.dataframe(df_display, width="stretch", hide_index=True)
 
@@ -372,9 +360,6 @@ elif app_mode == "🛒 Sales Operations":
         else pd.DataFrame()
     )
     if not df_sal_log.empty:
-      df_sal_log["Total Amount (৳)"] = (
-          df_sal_log["quantity_sold"] * df_sal_log["price"]
-      )
       df_sal_log = df_sal_log[
           [
               "date",
@@ -382,8 +367,6 @@ elif app_mode == "🛒 Sales Operations":
               "item_id",
               "item_name",
               "quantity_sold",
-              "price",
-              "Total Amount (৳)",
               "customer",
           ]
       ]
@@ -393,8 +376,6 @@ elif app_mode == "🛒 Sales Operations":
           "ID",
           "Item Name",
           "Qty",
-          "Unit Price",
-          "Total (৳)",
           "Customer",
       ]
       st.dataframe(df_sal_log, width="stretch", hide_index=True)
@@ -459,7 +440,7 @@ elif app_mode == "📦 Stock-In Operations":
 
 elif app_mode == "🔐 Admin Panel":
   st.markdown(
-      '<div class="section-title">🔐 Restricted Admin Panel (Full Management'
+      '<div class="section-title">🔐 Restricted Admin Panel (Financials & CRUD'
       " Suite)</div>",
       unsafe_allow_html=True,
   )
@@ -474,8 +455,17 @@ elif app_mode == "🔐 Admin Panel":
   if admin_pass == correct_admin_pass:
     st.success("🔓 Admin Authentication Successful")
 
+    # Display total inventory asset valuation exclusively inside the secure admin view
+    total_inv_val = df_dash["Total Value"].sum()
+    st.markdown(
+        f"""<div class="metric-card" style="margin-bottom: 1.5rem;"><div"
+        f" class="metric-title">Total Inventory Asset Value</div><div"
+        f" class="metric-value">৳{total_inv_val:,.2f}</div></div>""",
+        unsafe_allow_html=True,
+    )
+
     admin_sub_tab1, admin_sub_tab2, admin_sub_tab3, admin_sub_tab4, admin_sub_tab5, admin_sub_tab6 = st.tabs([
-        "👁️ View Catalog",
+        "👁️ View Catalog & Pricing",
         "➕ Add Part",
         "✏️ Edit Part",
         "🗑️ Delete Part",
@@ -484,9 +474,16 @@ elif app_mode == "🔐 Admin Panel":
     ])
 
     with admin_sub_tab1:
-      st.markdown("### Complete Inventory Catalog")
-      full_catalog = pd.read_sql("SELECT * FROM items", conn)
-      full_catalog.columns = ["Item ID", "Item Name", "Opening Stock", "Unit Price (৳)"]
+      st.markdown("### Complete Inventory Catalog & Unit Prices")
+      full_catalog = pd.read_sql(
+          "SELECT item_id, item_name, opening_stock, price FROM items", conn
+      )
+      full_catalog.columns = [
+          "Item ID",
+          "Item Name",
+          "Opening Stock",
+          "Unit Price (৳)",
+      ]
       st.dataframe(full_catalog, width="stretch", hide_index=True)
 
     with admin_sub_tab2:
@@ -622,6 +619,6 @@ elif app_mode == "🔐 Admin Panel":
         st.info("No sales records available to delete.")
 
   elif admin_pass == "":
-    st.info("🔒 Please enter the admin password to access CRUD controls.")
+    st.info("🔒 Please enter the admin password to access financial records & CRUD controls.")
   else:
     st.error("❌ Incorrect Admin Password.")
