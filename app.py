@@ -159,6 +159,17 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
+# --- SIDEBAR NAVIGATION ---
+st.sidebar.markdown("## 🧭 Navigation")
+app_mode = st.sidebar.radio(
+    "Choose Module", [
+        "📊 Inventory Dashboard",
+        "🛒 Sales Operations",
+        "📦 Stock-In Operations",
+        "🔐 Admin Panel",
+    ]
+)
+
 # --- FETCH DATA & AGGREGATE VALUES CORRECTLY ---
 df_items = pd.read_sql(
     "SELECT item_id, item_name, opening_stock, price FROM items", conn
@@ -216,21 +227,14 @@ with col_m4:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# --- TABS FOR MODULES ---
-tab_dash, tab_sales, tab_stockin, tab_admin = st.tabs([
-    "📊 Inventory Dashboard",
-    "🛒 Sales Operations",
-    "📦 Stock-In Operations",
-    "🔐 Admin Panel",
-])
-
 items_df = pd.read_sql("SELECT item_id, item_name, price FROM items", conn)
 item_options = [
     f"{row['item_id']} - {row['item_name']} (৳{row['price']})"
     for _, row in items_df.iterrows()
 ]
 
-with tab_dash:
+# --- MODULE ROUTING ---
+if app_mode == "📊 Inventory Dashboard":
   st.markdown(
       '<div class="section-title">Live Inventory Status, Stock Balance &'
       " Pricing</div>",
@@ -260,7 +264,7 @@ with tab_dash:
   ]
   st.dataframe(df_display, width="stretch", hide_index=True)
 
-with tab_sales:
+elif app_mode == "🛒 Sales Operations":
   col_s1, col_s2 = st.columns([1, 2])
   with col_s1:
     st.markdown(
@@ -323,3 +327,193 @@ with tab_sales:
         if not pd.read_sql("SELECT * FROM sales", conn).empty
         else pd.DataFrame()
     )
+    if not df_sal_log.empty:
+      df_sal_log["Total Amount (৳)"] = (
+          df_sal_log["quantity_sold"] * df_sal_log["price"]
+      )
+      df_sal_log = df_sal_log[
+          [
+              "date",
+              "invoice_no",
+              "item_id",
+              "item_name",
+              "quantity_sold",
+              "price",
+              "Total Amount (৳)",
+              "customer",
+          ]
+      ]
+      df_sal_log.columns = [
+          "Date",
+          "Invoice",
+          "ID",
+          "Item Name",
+          "Qty",
+          "Unit Price",
+          "Total (৳)",
+          "Customer",
+      ]
+      st.dataframe(df_sal_log, width="stretch", hide_index=True)
+    else:
+      st.info("No sales recorded yet.")
+
+elif app_mode == "📦 Stock-In Operations":
+  col_i1, col_i2 = st.columns([1, 2])
+  with col_i1:
+    st.markdown(
+        '<div class="section-title">Add Incoming Stock</div>',
+        unsafe_allow_html=True,
+    )
+    with st.form("stock_form_zoho", clear_on_submit=True):
+      i_date = st.date_input("Date", value=datetime.today(), key="idate")
+      i_ref = st.text_input("Challan/Ref No (e.g., IMP-208)", key="iref")
+      i_item = st.selectbox("Select Part", item_options, key="iitem")
+      i_qty = st.number_input(
+          "Quantity Received", min_value=1, step=1, value=1, key="iqty"
+      )
+      i_note = st.text_input("Supplier/Note", key="inote")
+      i_submitted = st.form_submit_button("Record Stock In")
+
+      if i_submitted:
+        if not i_item:
+          st.error("❌ Please select a valid item.")
+        else:
+          item_id = i_item.split(" - ")[0]
+          cur = conn.cursor()
+          cur.execute(
+              """INSERT INTO stock_in (date, ref_no, item_id, quantity, note) 
+                         VALUES (?, ?, ?, ?, ?)""",
+              (str(i_date), i_ref, item_id, i_qty, i_note),
+          )
+          conn.commit()
+          st.success("✅ Stock added successfully!")
+          st.rerun()
+
+  with col_i2:
+    st.markdown(
+        '<div class="section-title">Stock-In History Log</div>',
+        unsafe_allow_html=True,
+    )
+    df_stk_log = (
+        pd.merge(
+            pd.read_sql("SELECT * FROM stock_in", conn),
+            items_df,
+            on="item_id",
+            how="left",
+        )
+        if not pd.read_sql("SELECT * FROM stock_in", conn).empty
+        else pd.DataFrame()
+    )
+    if not df_stk_log.empty:
+      df_stk_log = df_stk_log[
+          ["date", "ref_no", "item_id", "item_name", "quantity", "note"]
+      ]
+      df_stk_log.columns = ["Date", "Challan", "ID", "Item Name", "Qty", "Note"]
+      st.dataframe(df_stk_log, width="stretch", hide_index=True)
+    else:
+      st.info("No stock-in records yet.")
+
+elif app_mode == "🔐 Admin Panel":
+  st.markdown(
+      '<div class="section-title">🔐 Restricted Admin Panel</div>',
+      unsafe_allow_html=True,
+  )
+  admin_pass = st.text_input("Enter Admin Password", type="password")
+
+  if admin_pass == "admin123":
+    st.success("🔓 Admin Authentication Successful")
+
+    admin_sub_tab1, admin_sub_tab2, admin_sub_tab3 = st.tabs([
+        "➕ Add New Part",
+        "✏️ Edit Price & Stock",
+        "🗑️ Delete Item",
+    ])
+
+    with admin_sub_tab1:
+      st.markdown("### Add a New Part to Catalog")
+      with st.form("add_new_part_form"):
+        new_id = st.text_input("Item ID (e.g., MP-006)")
+        new_name = st.text_input("Item Name (e.g., Alternator Belt)")
+        new_opening = st.number_input(
+            "Initial Opening Stock", min_value=0, step=1, value=0
+        )
+        new_price = st.number_input(
+            "Unit Price (৳)", min_value=0.0, step=10.0, value=100.0
+        )
+        add_submitted = st.form_submit_button("Add Part to Catalog")
+
+        if add_submitted:
+          if not new_id or not new_name:
+            st.error("❌ Item ID and Name are required.")
+          else:
+            try:
+              cur = conn.cursor()
+              cur.execute(
+                  """INSERT INTO items (item_id, item_name, opening_stock, price) 
+                             VALUES (?, ?, ?, ?)""",
+                  (new_id.strip(), new_name.strip(), new_opening, new_price),
+              )
+              conn.commit()
+              st.success(f"✅ Successfully added {new_id} - {new_name}!")
+              st.rerun()
+            except sqlite3.IntegrityError:
+              st.error(
+                  f"❌ Error: Item ID '{new_id}' already exists in the catalog!"
+              )
+
+    with admin_sub_tab2:
+      st.markdown("### Edit Existing Part Details & Price")
+      edit_item_select = st.selectbox(
+          "Select Item to Edit", item_options, key="edit_select"
+      )
+      if edit_item_select:
+        selected_id = edit_item_select.split(" - ")[0]
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT item_name, opening_stock, price FROM items WHERE item_id = ?",
+            (selected_id,),
+        )
+        curr_name, curr_stock, curr_price = cur.fetchone()
+
+        with st.form("edit_part_form"):
+          e_name = st.text_input("Item Name", value=curr_name)
+          e_stock = st.number_input(
+              "Opening Stock", value=curr_stock, min_value=0, step=1
+          )
+          e_price = st.number_input(
+              "Unit Price (৳)", value=float(curr_price), min_value=0.0, step=10.0
+          )
+          update_submitted = st.form_submit_button("Update Item Details")
+
+          if update_submitted:
+            cur.execute(
+                """UPDATE items SET item_name = ?, opening_stock = ?, price = ? 
+                           WHERE item_id = ?""",
+                (e_name, e_stock, e_price, selected_id),
+            )
+            conn.commit()
+            st.success(f"✅ Updated {selected_id} successfully!")
+            st.rerun()
+
+    with admin_sub_tab3:
+      st.markdown("### Delete Item from Catalog")
+      del_item_select = st.selectbox(
+          "Select Item to Delete", item_options, key="del_select"
+      )
+      if del_item_select:
+        del_id = del_item_select.split(" - ")[0]
+        st.warning(
+            f"⚠ Warning: Deleting item `{del_id}` will remove it from the"
+            " active catalog."
+        )
+        if st.button("Confirm and Delete Item", type="primary"):
+          cur = conn.cursor()
+          cur.execute("DELETE FROM items WHERE item_id = ?", (del_id,))
+          conn.commit()
+          st.success(f"🗑️ Item {del_id} deleted successfully!")
+          st.rerun()
+
+  elif admin_pass == "":
+    st.info("🔒 Please enter the admin password to access controls.")
+  else:
+    st.error("❌ Incorrect Admin Password.")
