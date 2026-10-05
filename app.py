@@ -4,26 +4,43 @@ import pandas as pd
 import sqlite3
 import streamlit as st
 
-# --- PAGE CONFIG & RESPONSIVE ENTERPRISE CSS ---
+# --- PAGE CONFIG & iOS-INSPIRED THEME ---
 st.set_page_config(
     page_title="Sabir's Inventory Management",
     page_icon="⚙️",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 st.markdown("""
     <style>
+    /* iOS Global Theme */
     .main {
-        background-color: #F8F9FA;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #F2F2F7;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
+    
+    /* Glassmorphism Sidebar Styling */
+    [data-testid="stSidebar"] {
+        background-color: rgba(255, 255, 255, 0.75) !important;
+        backdrop-filter: blur(20px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+        border-right: 1px solid rgba(209, 213, 219, 0.4);
+        width: 50vw !important; /* Half the frame width on mobile/tablet */
+        max-width: 320px;
+    }
+
+    /* App Header Card (iOS Card Style) */
     .app-header {
-        background: linear-gradient(135deg, #1A202C 0%, #2D3748 100%);
-        color: white;
+        background: rgba(255, 255, 255, 0.85);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.6);
+        color: #1C1C1E;
         padding: 1.2rem 1.5rem;
-        border-radius: 10px;
+        border-radius: 16px;
         margin-bottom: 1.5rem;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
         display: flex;
         flex-direction: column;
     }
@@ -35,59 +52,76 @@ st.markdown("""
         }
     }
     .app-header h1 {
-        color: white;
-        font-size: 1.4rem;
+        color: #1C1C1E;
+        font-size: 1.35rem;
         margin: 0;
-        font-weight: 600;
+        font-weight: 700;
+        letter-spacing: -0.3px;
     }
     .app-header p {
-        color: #A0AEC0;
+        color: #8E8E93;
         margin: 0;
         font-size: 0.85rem;
+        font-weight: 400;
     }
+
+    /* iOS Metric Cards */
     .metric-card {
-        background-color: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 8px;
+        background-color: rgba(255, 255, 255, 0.85);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.6);
+        border-radius: 14px;
         padding: 1rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.03);
         text-align: center;
         margin-bottom: 0.5rem;
     }
     .metric-title {
-        color: #718096;
-        font-size: 0.75rem;
+        color: #8E8E93;
+        font-size: 0.7rem;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 0.6px;
     }
     .metric-value {
-        color: #2D3748;
-        font-size: 1.5rem;
+        color: #1C1C1E;
+        font-size: 1.45rem;
         font-weight: 700;
         margin-top: 0.2rem;
+        letter-spacing: -0.5px;
     }
+
+    /* Section Titles */
     .section-title {
         font-size: 1.05rem;
         font-weight: 600;
-        color: #2D3748;
+        color: #1C1C1E;
         margin-top: 1.2rem;
         margin-bottom: 0.6rem;
-        border-bottom: 2px solid #EDF2F7;
-        padding-bottom: 0.3rem;
+        letter-spacing: -0.2px;
     }
+
+    /* iOS Styled Buttons */
     .stButton>button {
-        background-color: #0066F5;
+        background-color: #007AFF;
         color: white;
-        border-radius: 6px;
+        border-radius: 10px;
         font-weight: 600;
+        font-size: 0.9rem;
         border: none;
         padding: 0.5rem 1rem;
         width: 100%;
+        box-shadow: 0 4px 12px rgba(0, 122, 255, 0.25);
+        transition: all 0.2s ease;
     }
     .stButton>button:hover {
-        background-color: #0052C2;
-        color: white;
+        background-color: #0056B3;
+        box-shadow: 0 6px 16px rgba(0, 122, 255, 0.35);
+    }
+    
+    /* Input Fields Border Radius (iOS Style) */
+    input, select, textarea {
+        border-radius: 10px !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -161,10 +195,10 @@ st.markdown("""
     <div class="app-header">
         <div>
             <h1>⚙️ Sabir's Inventory Management</h1>
-            <p>Responsive Stock, Pricing & Sales Operations</p>
+            <p>Modern Stock, Pricing & Sales Suite</p>
         </div>
         <div style="margin-top: 8px;">
-            <span style="background: #2D3748; padding: 5px 10px; border-radius: 4px; font-size: 0.8rem; color: #E2E8F0;">🟢 System Online</span>
+            <span style="background: rgba(52, 199, 89, 0.15); color: #248A3D; padding: 5px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 600;">● System Online</span>
         </div>
     </div>
 """, unsafe_allow_html=True)
@@ -281,7 +315,7 @@ elif app_mode == "🛒 Sales Operations":
         '<div class="section-title">Record New Sale</div>',
         unsafe_allow_html=True,
     )
-    with st.form("sale_form_responsive", clear_on_submit=True):
+    with st.form("sale_form_ios", clear_on_submit=True):
       s_date = st.date_input("Date", value=datetime.today())
       s_invoice = st.text_input("Invoice No (e.g., CH-005)")
       s_item = st.selectbox("Select Part", item_options)
@@ -374,7 +408,7 @@ elif app_mode == "📦 Stock-In Operations":
         '<div class="section-title">Add Incoming Stock</div>',
         unsafe_allow_html=True,
     )
-    with st.form("stock_form_responsive", clear_on_submit=True):
+    with st.form("stock_form_ios", clear_on_submit=True):
       i_date = st.date_input("Date", value=datetime.today(), key="idate")
       i_ref = st.text_input("Challan/Ref No (e.g., IMP-208)", key="iref")
       i_item = st.selectbox("Select Part", item_options, key="iitem")
