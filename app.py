@@ -125,7 +125,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- DATABASE SETUP & MIGRATION FOR PRICING ---
+# --- DATABASE SETUP & MIGRATION FOR TRANSACTION PRICING ---
 def init_db():
   conn = sqlite3.connect("inventory.db", check_same_thread=False)
   cursor = conn.cursor()
@@ -145,6 +145,7 @@ def init_db():
   except sqlite3.OperationalError:
     pass
 
+  # Stock-in table with unit cost support
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS stock_in (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,9 +153,17 @@ def init_db():
             ref_no TEXT,
             item_id TEXT,
             quantity INTEGER,
+            unit_cost REAL DEFAULT 0.0,
             note TEXT
         )
     """)
+  try:
+    cursor.execute("ALTER TABLE stock_in ADD COLUMN unit_cost REAL DEFAULT 0.0")
+    conn.commit()
+  except sqlite3.OperationalError:
+    pass
+
+  # Sales table with unit selling price support
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS sales (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,9 +171,16 @@ def init_db():
             invoice_no TEXT,
             item_id TEXT,
             quantity_sold INTEGER,
+            unit_price REAL DEFAULT 0.0,
             customer TEXT
         )
     """)
+  try:
+    cursor.execute("ALTER TABLE sales ADD COLUMN unit_price REAL DEFAULT 0.0")
+    conn.commit()
+  except sqlite3.OperationalError:
+    pass
+
   conn.commit()
 
   cursor.execute("SELECT COUNT(*) FROM items")
@@ -216,8 +232,12 @@ app_mode = st.sidebar.radio(
 df_items = pd.read_sql(
     "SELECT item_id, item_name, opening_stock, price FROM items", conn
 )
-df_stock_in = pd.read_sql("SELECT item_id, quantity FROM stock_in", conn)
-df_sales = pd.read_sql("SELECT item_id, quantity_sold FROM sales", conn)
+df_stock_in = pd.read_sql(
+    "SELECT item_id, quantity, unit_cost FROM stock_in", conn
+)
+df_sales = pd.read_sql(
+    "SELECT item_id, quantity_sold, unit_price FROM sales", conn
+)
 
 stock_in_grouped = (
     df_stock_in.groupby("item_id")["quantity"].sum().reset_index()
@@ -307,6 +327,18 @@ elif app_mode == "🛒 Sales Operations":
       s_invoice = st.text_input("Invoice No (e.g., CH-005)")
       s_item = st.selectbox("Select Part", item_options)
       s_qty = st.number_input("Quantity", min_value=1, step=1, value=1)
+
+      # Extract default price from catalog selection
+      default_p = 0.0
+      if s_item:
+        try:
+          default_p = float(s_item.split("(৳")[1].replace(")", ""))
+        except Exception:
+          pass
+
+      s_price = st.number_input(
+          "Unit Selling Price (৳)", min_value=0.0, step=10.0, value=default_p
+      )
       s_customer = st.text_input("Customer Name")
       s_submitted = st.form_submit_button("Confirm Sale")
 
@@ -335,9 +367,16 @@ elif app_mode == "🛒 Sales Operations":
             st.error(f"❌ Stock Error! Available balance: {bal}")
           else:
             cur.execute(
-                """INSERT INTO sales (date, invoice_no, item_id, quantity_sold, customer) 
-                           VALUES (?, ?, ?, ?, ?)""",
-                (str(s_date), s_invoice, item_id, s_qty, s_customer),
+                """INSERT INTO sales (date, invoice_no, item_id, quantity_sold, unit_price, customer) 
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    str(s_date),
+                    s_invoice,
+                    item_id,
+                    s_qty,
+                    s_price,
+                    s_customer,
+                ),
             )
             conn.commit()
             st.success("✅ Sale recorded successfully!")
@@ -349,16 +388,19 @@ elif app_mode == "🛒 Sales Operations":
         unsafe_allow_html=True,
     )
     df_sal_log = (
-        pd.merge(
-            pd.read_sql("SELECT * FROM sales", conn),
-            items_df,
-            on="item_id",
-            how="left",
+        pd.read_sql(
+            "SELECT id, date, invoice_no, item_id, quantity_sold, unit_price,"
+            " customer FROM sales",
+            conn,
         )
         if not pd.read_sql("SELECT * FROM sales", conn).empty
         else pd.DataFrame()
     )
     if not df_sal_log.empty:
+      df_sal_log = pd.merge(df_sal_log, items_df, on="item_id", how="left")
+      df_sal_log["Total Amount (৳)"] = (
+          df_sal_log["quantity_sold"] * df_sal_log["unit_price"]
+      )
       df_sal_log = df_sal_log[
           [
               "date",
@@ -366,6 +408,8 @@ elif app_mode == "🛒 Sales Operations":
               "item_id",
               "item_name",
               "quantity_sold",
+              "unit_price",
+              "Total Amount (৳)",
               "customer",
           ]
       ]
@@ -375,6 +419,8 @@ elif app_mode == "🛒 Sales Operations":
           "ID",
           "Item Name",
           "Qty",
+          "Unit Price",
+          "Total (৳)",
           "Customer",
       ]
       st.dataframe(df_sal_log, width="stretch", hide_index=True)
@@ -395,6 +441,21 @@ elif app_mode == "📦 Stock-In Operations":
       i_qty = st.number_input(
           "Quantity Received", min_value=1, step=1, value=1, key="iqty"
       )
+
+      default_cost = 0.0
+      if i_item:
+        try:
+          default_cost = float(i_item.split("(৳")[1].replace(")", ""))
+        except Exception:
+          pass
+
+      i_cost = st.number_input(
+          "Unit Purchase Cost (৳)",
+          min_value=0.0,
+          step=10.0,
+          value=default_cost,
+          key="icost",
+      )
       i_note = st.text_input("Supplier/Note", key="inote")
       i_submitted = st.form_submit_button("Record Stock In")
 
@@ -405,9 +466,9 @@ elif app_mode == "📦 Stock-In Operations":
           item_id = i_item.split(" - ")[0]
           cur = conn.cursor()
           cur.execute(
-              """INSERT INTO stock_in (date, ref_no, item_id, quantity, note) 
-                         VALUES (?, ?, ?, ?, ?)""",
-              (str(i_date), i_ref, item_id, i_qty, i_note),
+              """INSERT INTO stock_in (date, ref_no, item_id, quantity, unit_cost, note) 
+                         VALUES (?, ?, ?, ?, ?, ?)""",
+              (str(i_date), i_ref, item_id, i_qty, i_cost, i_note),
           )
           conn.commit()
           st.success("✅ Stock added successfully!")
@@ -419,20 +480,41 @@ elif app_mode == "📦 Stock-In Operations":
         unsafe_allow_html=True,
     )
     df_stk_log = (
-        pd.merge(
-            pd.read_sql("SELECT * FROM stock_in", conn),
-            items_df,
-            on="item_id",
-            how="left",
+        pd.read_sql(
+            "SELECT id, date, ref_no, item_id, quantity, unit_cost, note FROM"
+            " stock_in",
+            conn,
         )
         if not pd.read_sql("SELECT * FROM stock_in", conn).empty
         else pd.DataFrame()
     )
     if not df_stk_log.empty:
+      df_stk_log = pd.merge(df_stk_log, items_df, on="item_id", how="left")
+      df_stk_log["Total Cost (৳)"] = (
+          df_stk_log["quantity"] * df_stk_log["unit_cost"]
+      )
       df_stk_log = df_stk_log[
-          ["date", "ref_no", "item_id", "item_name", "quantity", "note"]
+          [
+              "date",
+              "ref_no",
+              "item_id",
+              "item_name",
+              "quantity",
+              "unit_cost",
+              "Total Cost (৳)",
+              "note",
+          ]
       ]
-      df_stk_log.columns = ["Date", "Challan", "ID", "Item Name", "Qty", "Note"]
+      df_stk_log.columns = [
+          "Date",
+          "Challan",
+          "ID",
+          "Item Name",
+          "Qty",
+          "Unit Cost",
+          "Total Cost (৳)",
+          "Note",
+      ]
       st.dataframe(df_stk_log, width="stretch", hide_index=True)
     else:
       st.info("No stock-in records yet.")
@@ -454,73 +536,139 @@ elif app_mode == "🔐 Admin Panel":
   if admin_pass == correct_admin_pass:
     st.success("🔓 Admin Authentication Successful")
 
-    total_inv_val = df_dash["Total Value"].sum()
-    st.markdown(
-        f"""<div class="metric-card" style="margin-bottom: 1.5rem;"><div"
-        f" class="metric-title">Total Inventory Asset Value</div><div"
-        f" class="metric-value">৳{total_inv_val:,.2f}</div></div>""",
-        unsafe_allow_html=True,
+    # --- CALCULATE TOTAL MONEY MADE / FINANCIALS ---
+    df_sales_calc = pd.read_sql(
+        "SELECT quantity_sold, unit_price FROM sales", conn
     )
+    total_revenue = (
+        (df_sales_calc["quantity_sold"] * df_sales_calc["unit_price"]).sum()
+        if not df_sales_calc.empty
+        else 0.0
+    )
+
+    df_stock_calc = pd.read_sql("SELECT quantity, unit_cost FROM stock_in", conn)
+    total_stock_spent = (
+        (df_stock_calc["quantity"] * df_stock_calc["unit_cost"]).sum()
+        if not df_stock_calc.empty
+        else 0.0
+    )
+
+    total_inv_val = df_dash["Total Value"].sum()
+    net_profit_margin = total_revenue - total_stock_spent
+
+    # Display Financial KPIs in Admin Panel
+    f_col1, f_col2, f_col3 = st.columns(3)
+    with f_col1:
+      st.markdown(
+          f"""<div class="metric-card"><div class="metric-title">Total Revenue Made</div><div"
+          f" class="metric-value" style="color: #34C759;">৳{total_revenue:,.2f}</div></div>""",
+          unsafe_allow_html=True,
+      )
+    with f_col2:
+      st.markdown(
+          f"""<div class="metric-card"><div class="metric-title">Stock-In Spent</div><div"
+          f" class="metric-value" style="color: #FF9500;">৳{total_stock_spent:,.2f}</div></div>""",
+          unsafe_allow_html=True,
+      )
+    with f_col3:
+      st.markdown(
+          f"""<div class="metric-card"><div class="metric-title">Inventory Asset"
+          f" Value</div><div class="metric-value" style="color:"
+          f" #007AFF;">৳{total_inv_val:,.2f}</div></div>""",
+          unsafe_allow_html=True,
+      )
+
+    st.markdown("<br>", unsafe_allow_html=True)
 
     admin_sub_tab1, admin_sub_tab2, admin_sub_tab3, admin_sub_tab4, admin_sub_tab5, admin_sub_tab6, admin_sub_tab7 = st.tabs([
         "📈 Everyday Dashboard",
         "👁️ View Catalog & Pricing",
         "➕ Add Part",
-        "✏️ Edit Part",
+        "✏️️ Edit Part",
         "🗑️ Delete Part",
         "📦 Delete Stock-In",
         "🛒 Delete Sale",
     ])
 
     with admin_sub_tab1:
-      st.markdown("### 📅 Everyday Transaction Details & Daily Summary")
-      
-      # Load raw stock-in and sales data
-      raw_stock = pd.read_sql("SELECT date, item_id, quantity FROM stock_in", conn)
-      raw_sales = pd.read_sql("SELECT date, item_id, quantity_sold FROM sales", conn)
+      st.markdown("### 📅 Everyday Transaction Details & Financial Breakdown")
+
+      raw_stock = pd.read_sql(
+          "SELECT date, item_id, quantity, unit_cost FROM stock_in", conn
+      )
+      raw_sales = pd.read_sql(
+          "SELECT date, item_id, quantity_sold, unit_price FROM sales", conn
+      )
 
       if not raw_stock.empty or not raw_sales.empty:
-        # Group stock-in by date
+        raw_stock["Total Cost"] = raw_stock["quantity"] * raw_stock["unit_cost"]
+        raw_sales["Total Revenue"] = (
+            raw_sales["quantity_sold"] * raw_sales["unit_price"]
+        )
+
         daily_stock = (
-            raw_stock.groupby("date")["quantity"].sum().reset_index()
+            raw_stock.groupby("date")
+            .agg({"quantity": "sum", "Total Cost": "sum"})
+            .reset_index()
             if not raw_stock.empty
-            else pd.DataFrame(columns=["date", "quantity"])
+            else pd.DataFrame(columns=["date", "quantity", "Total Cost"])
         )
-        daily_stock.rename(columns={"quantity": "Total Stock-In Qty"}, inplace=True)
+        daily_stock.rename(
+            columns={
+                "quantity": "Total Stock-In Qty",
+                "Total Cost": "Stock-In Spend (৳)",
+            },
+            inplace=True,
+        )
 
-        # Group sales by date
         daily_sales = (
-            raw_sales.groupby("date")["quantity_sold"].sum().reset_index()
+            raw_sales.groupby("date")
+            .agg({"quantity_sold": "sum", "Total Revenue": "sum"})
+            .reset_index()
             if not raw_sales.empty
-            else pd.DataFrame(columns=["date", "quantity_sold"])
+            else pd.DataFrame(columns=["date", "quantity_sold", "Total Revenue"])
         )
-        daily_sales.rename(columns={"quantity_sold": "Total Sold Qty"}, inplace=True)
+        daily_sales.rename(
+            columns={
+                "quantity_sold": "Total Sold Qty",
+                "Total Revenue": "Revenue Made (৳)",
+            },
+            inplace=True,
+        )
 
-        # Merge daily statistics together by date
-        daily_summary = pd.merge(daily_stock, daily_sales, on="date", how="outer").fillna(0)
+        daily_summary = pd.merge(
+            daily_stock, daily_sales, on="date", how="outer"
+        ).fillna(0)
         daily_summary = daily_summary.sort_values(by="date", ascending=False)
 
-        st.markdown("#### 📊 Daily Summary Overview")
+        st.markdown("#### 📊 Daily Summary & Earnings Overview")
         st.dataframe(daily_summary, width="stretch", hide_index=True)
 
         st.markdown("---")
         st.markdown("#### 🔍 Filter Everyday Details by Specific Date")
         all_dates = sorted(
-            list(set(raw_stock["date"].dropna().tolist() + raw_sales["date"].dropna().tolist())),
+            list(
+                set(
+                    raw_stock["date"].dropna().tolist()
+                    + raw_sales["date"].dropna().tolist()
+                )
+            ),
             reverse=True,
         )
         if all_dates:
           selected_date = st.selectbox("Select Date", all_dates)
-          
+
           col_d1, col_d2 = st.columns(2)
           with col_d1:
             st.markdown(f"**📦 Stock-In Entries on {selected_date}**")
             sub_stk = pd.read_sql(
-                "SELECT ref_no, item_id, quantity, note FROM stock_in WHERE date = ?",
+                "SELECT ref_no, item_id, quantity, unit_cost, note FROM"
+                " stock_in WHERE date = ?",
                 conn,
                 params=(selected_date,),
             )
             if not sub_stk.empty:
+              sub_stk["Total"] = sub_stk["quantity"] * sub_stk["unit_cost"]
               st.dataframe(sub_stk, width="stretch", hide_index=True)
             else:
               st.info("No stock-in records for this date.")
@@ -528,11 +676,15 @@ elif app_mode == "🔐 Admin Panel":
           with col_d2:
             st.markdown(f"**🛒 Sales Entries on {selected_date}**")
             sub_sal = pd.read_sql(
-                "SELECT invoice_no, item_id, quantity_sold, customer FROM sales WHERE date = ?",
+                "SELECT invoice_no, item_id, quantity_sold, unit_price,"
+                " customer FROM sales WHERE date = ?",
                 conn,
                 params=(selected_date,),
             )
             if not sub_sal.empty:
+              sub_sal["Total"] = (
+                  sub_sal["quantity_sold"] * sub_sal["unit_price"]
+              )
               st.dataframe(sub_sal, width="stretch", hide_index=True)
             else:
               st.info("No sales records for this date.")
@@ -641,23 +793,33 @@ elif app_mode == "🔐 Admin Panel":
     with admin_sub_tab6:
       st.markdown("### Delete Incoming Stock Record")
       df_stock_full = pd.read_sql(
-          "SELECT id, date, ref_no, item_id, quantity, note FROM stock_in", conn
+          "SELECT id, date, ref_no, item_id, quantity, unit_cost, note FROM"
+          " stock_in",
+          conn,
       )
       if not df_stock_full.empty:
         stock_choices = [
-            f"ID: {row['id']} | Date: {row['date']} | Ref: {row['ref_no']} | Item: {row['item_id']} | Qty: {row['quantity']}"
+            f"ID: {row['id']} | Date: {row['date']} | Ref: {row['ref_no']} | Item: {row['item_id']} | Qty: {row['quantity']} | Cost: ৳{row['unit_cost']}"
             for _, row in df_stock_full.iterrows()
         ]
         selected_stock_del = st.selectbox(
             "Select Stock-In Entry to Remove", stock_choices
         )
         if selected_stock_del:
-          stock_row_id = int(selected_stock_del.split(" | ")[0].replace("ID: ", ""))
-          if st.button("Confirm Delete Stock-In Entry", type="primary", key="del_stk_btn"):
+          stock_row_id = int(
+              selected_stock_del.split(" | ")[0].replace("ID: ", "")
+          )
+          if st.button(
+              "Confirm Delete Stock-In Entry",
+              type="primary",
+              key="del_stk_btn",
+          ):
             cur = conn.cursor()
             cur.execute("DELETE FROM stock_in WHERE id = ?", (stock_row_id,))
             conn.commit()
-            st.success(f"🗑 Stock-In record ID {stock_row_id} deleted successfully!")
+            st.success(
+                f"🗑 Stock-In record ID {stock_row_id} deleted successfully!"
+            )
             st.rerun()
       else:
         st.info("No stock-in records available to delete.")
@@ -665,28 +827,39 @@ elif app_mode == "🔐 Admin Panel":
     with admin_sub_tab7:
       st.markdown("### Delete Sales Transaction Record")
       df_sales_full = pd.read_sql(
-          "SELECT id, date, invoice_no, item_id, quantity_sold, customer FROM sales", conn
+          "SELECT id, date, invoice_no, item_id, quantity_sold, unit_price,"
+          " customer FROM sales",
+          conn,
       )
       if not df_sales_full.empty:
         sales_choices = [
-            f"ID: {row['id']} | Date: {row['date']} | Inv: {row['invoice_no']} | Item: {row['item_id']} | Qty: {row['quantity_sold']} | Cust: {row['customer']}"
+            f"ID: {row['id']} | Date: {row['date']} | Inv: {row['invoice_no']} | Item: {row['item_id']} | Qty: {row['quantity_sold']} | Price: ৳{row['unit_price']} | Cust: {row['customer']}"
             for _, row in df_sales_full.iterrows()
         ]
         selected_sale_del = st.selectbox(
             "Select Sale Entry to Remove", sales_choices
         )
         if selected_sale_del:
-          sale_row_id = int(selected_sale_del.split(" | ")[0].replace("ID: ", ""))
-          if st.button("Confirm Delete Sale Entry", type="primary", key="del_sale_btn"):
+          sale_row_id = int(
+              selected_sale_del.split(" | ")[0].replace("ID: ", "")
+          )
+          if st.button(
+              "Confirm Delete Sale Entry", type="primary", key="del_sale_btn"
+          ):
             cur = conn.cursor()
             cur.execute("DELETE FROM sales WHERE id = ?", (sale_row_id,))
             conn.commit()
-            st.success(f"🗑 Sales record ID {sale_row_id} deleted successfully!")
+            st.success(
+                f"🗑 Sales record ID {sale_row_id} deleted successfully!"
+            )
             st.rerun()
       else:
         st.info("No sales records available to delete.")
 
   elif admin_pass == "":
-    st.info("🔒 Please enter the admin password to access financial records & everyday dashboard.")
+    st.info(
+        "🔒 Please enter the admin password to access financial records &"
+        " everyday dashboard."
+    )
   else:
     st.error("❌ Incorrect Admin Password.")
