@@ -420,7 +420,7 @@ elif app_mode == "🔐 Admin Panel":
   )
   admin_pass = st.text_input("Enter Admin Password", type="password")
 
-  if admin_pass == "admin123":
+  if admin_pass == st.secrets["ADMIN_PASSWORD"]:
     st.success("🔓 Admin Authentication Successful")
 
     admin_sub_tab1, admin_sub_tab2, admin_sub_tab3 = st.tabs([
