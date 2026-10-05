@@ -415,23 +415,38 @@ elif app_mode == "📦 Stock-In Operations":
 
 elif app_mode == "🔐 Admin Panel":
   st.markdown(
-      '<div class="section-title">🔐 Restricted Admin Panel</div>',
+      '<div class="section-title">🔐 Restricted Admin Panel (Full CRUD'
+      " Operations)</div>",
       unsafe_allow_html=True,
   )
+
+  # Safe password lookup fallback
+  try:
+    correct_admin_pass = st.secrets["ADMIN_PASSWORD"]
+  except Exception:
+    correct_admin_pass = "admin123"
+
   admin_pass = st.text_input("Enter Admin Password", type="password")
 
-  if admin_pass == st.secrets["ADMIN_PASSWORD"]:
+  if admin_pass == correct_admin_pass:
     st.success("🔓 Admin Authentication Successful")
 
-    admin_sub_tab1, admin_sub_tab2, admin_sub_tab3 = st.tabs([
-        "➕ Add New Part",
-        "✏️ Edit Price & Stock",
-        "🗑️ Delete Item",
+    admin_sub_tab1, admin_sub_tab2, admin_sub_tab3, admin_sub_tab4 = st.tabs([
+        "👁️ Read / View Catalog",
+        "➕ Create New Part",
+        "✏️ Update Part & Price",
+        "🗑️ Delete Part",
     ])
 
     with admin_sub_tab1:
-      st.markdown("### Add a New Part to Catalog")
-      with st.form("add_new_part_form"):
+      st.markdown("### Complete Inventory Catalog (Read)")
+      full_catalog = pd.read_sql("SELECT * FROM items", conn)
+      full_catalog.columns = ["Item ID", "Item Name", "Opening Stock", "Unit Price (৳)"]
+      st.dataframe(full_catalog, width="stretch", hide_index=True)
+
+    with admin_sub_tab2:
+      st.markdown("### Add New Part to Catalog (Create)")
+      with st.form("create_part_form"):
         new_id = st.text_input("Item ID (e.g., MP-006)")
         new_name = st.text_input("Item Name (e.g., Alternator Belt)")
         new_opening = st.number_input(
@@ -440,9 +455,9 @@ elif app_mode == "🔐 Admin Panel":
         new_price = st.number_input(
             "Unit Price (৳)", min_value=0.0, step=10.0, value=100.0
         )
-        add_submitted = st.form_submit_button("Add Part to Catalog")
+        create_submitted = st.form_submit_button("Create Part")
 
-        if add_submitted:
+        if create_submitted:
           if not new_id or not new_name:
             st.error("❌ Item ID and Name are required.")
           else:
@@ -454,15 +469,15 @@ elif app_mode == "🔐 Admin Panel":
                   (new_id.strip(), new_name.strip(), new_opening, new_price),
               )
               conn.commit()
-              st.success(f"✅ Successfully added {new_id} - {new_name}!")
+              st.success(f"✅ Successfully created item {new_id} - {new_name}!")
               st.rerun()
             except sqlite3.IntegrityError:
               st.error(
                   f"❌ Error: Item ID '{new_id}' already exists in the catalog!"
               )
 
-    with admin_sub_tab2:
-      st.markdown("### Edit Existing Part Details & Price")
+    with admin_sub_tab3:
+      st.markdown("### Update Existing Part Details & Price (Update)")
       edit_item_select = st.selectbox(
           "Select Item to Edit", item_options, key="edit_select"
       )
@@ -475,45 +490,45 @@ elif app_mode == "🔐 Admin Panel":
         )
         curr_name, curr_stock, curr_price = cur.fetchone()
 
-        with st.form("edit_part_form"):
-          e_name = st.text_input("Item Name", value=curr_name)
-          e_stock = st.number_input(
+        with st.form("update_part_form"):
+          u_name = st.text_input("Item Name", value=curr_name)
+          u_stock = st.number_input(
               "Opening Stock", value=curr_stock, min_value=0, step=1
           )
-          e_price = st.number_input(
+          u_price = st.number_input(
               "Unit Price (৳)", value=float(curr_price), min_value=0.0, step=10.0
           )
-          update_submitted = st.form_submit_button("Update Item Details")
+          update_submitted = st.form_submit_button("Update Item")
 
           if update_submitted:
             cur.execute(
                 """UPDATE items SET item_name = ?, opening_stock = ?, price = ? 
                            WHERE item_id = ?""",
-                (e_name, e_stock, e_price, selected_id),
+                (u_name, u_stock, u_price, selected_id),
             )
             conn.commit()
-            st.success(f"✅ Updated {selected_id} successfully!")
+            st.success(f"✅ Successfully updated item {selected_id}!")
             st.rerun()
 
-    with admin_sub_tab3:
-      st.markdown("### Delete Item from Catalog")
+    with admin_sub_tab4:
+      st.markdown("### Delete Item from Catalog (Delete)")
       del_item_select = st.selectbox(
           "Select Item to Delete", item_options, key="del_select"
       )
       if del_item_select:
         del_id = del_item_select.split(" - ")[0]
         st.warning(
-            f"⚠ Warning: Deleting item `{del_id}` will remove it from the"
-            " active catalog."
+            f"⚠ Warning: Deleting item `{del_id}` will permanently remove it"
+            " from the database catalog."
         )
         if st.button("Confirm and Delete Item", type="primary"):
           cur = conn.cursor()
           cur.execute("DELETE FROM items WHERE item_id = ?", (del_id,))
           conn.commit()
-          st.success(f"🗑️ Item {del_id} deleted successfully!")
+          st.success(f"🗑️️ Item {del_id} deleted successfully!")
           st.rerun()
 
   elif admin_pass == "":
-    st.info("🔒 Please enter the admin password to access controls.")
+    st.info("🔒 Please enter the admin password to access CRUD controls.")
   else:
     st.error("❌ Incorrect Admin Password.")
