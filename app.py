@@ -145,7 +145,6 @@ def init_db():
   except sqlite3.OperationalError:
     pass
 
-  # Stock-in table with unit cost support
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS stock_in (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -163,7 +162,6 @@ def init_db():
   except sqlite3.OperationalError:
     pass
 
-  # Sales table with unit selling price support
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS sales (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -328,7 +326,6 @@ elif app_mode == "🛒 Sales Operations":
       s_item = st.selectbox("Select Part", item_options)
       s_qty = st.number_input("Quantity", min_value=1, step=1, value=1)
 
-      # Extract default price from catalog selection
       default_p = 0.0
       if s_item:
         try:
@@ -536,7 +533,7 @@ elif app_mode == "🔐 Admin Panel":
   if admin_pass == correct_admin_pass:
     st.success("🔓 Admin Authentication Successful")
 
-    # --- CALCULATE TOTAL MONEY MADE / FINANCIALS ---
+    # --- CALCULATE FINANCIALS & NET PROFIT ---
     df_sales_calc = pd.read_sql(
         "SELECT quantity_sold, unit_price FROM sales", conn
     )
@@ -553,14 +550,14 @@ elif app_mode == "🔐 Admin Panel":
         else 0.0
     )
 
+    net_profit = total_revenue - total_stock_spent
     total_inv_val = df_dash["Total Value"].sum()
-    net_profit_margin = total_revenue - total_stock_spent
 
-    # Display Financial KPIs in Admin Panel
-    f_col1, f_col2, f_col3 = st.columns(3)
+    # Display Financial KPIs in Admin Panel (Revenue, Stock Spent, Profit, Inventory Value)
+    f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     with f_col1:
       st.markdown(
-          f"""<div class="metric-card"><div class="metric-title">Total Revenue Made</div><div"
+          f"""<div class="metric-card"><div class="metric-title">Total Revenue</div><div"
           f" class="metric-value" style="color: #34C759;">৳{total_revenue:,.2f}</div></div>""",
           unsafe_allow_html=True,
       )
@@ -571,6 +568,14 @@ elif app_mode == "🔐 Admin Panel":
           unsafe_allow_html=True,
       )
     with f_col3:
+      profit_color = "#34C759" if net_profit >= 0 else "#FF3B30"
+      st.markdown(
+          f"""<div class="metric-card"><div class="metric-title">Total"
+          f" Profit</div><div class="metric-value" style="color:"
+          f" {profit_color};">৳{net_profit:,.2f}</div></div>""",
+          unsafe_allow_html=True,
+      )
+    with f_col4:
       st.markdown(
           f"""<div class="metric-card"><div class="metric-title">Inventory Asset"
           f" Value</div><div class="metric-value" style="color:"
@@ -584,7 +589,7 @@ elif app_mode == "🔐 Admin Panel":
         "📈 Everyday Dashboard",
         "👁️ View Catalog & Pricing",
         "➕ Add Part",
-        "✏️️ Edit Part",
+        "✏️ Edit Part",
         "🗑️ Delete Part",
         "📦 Delete Stock-In",
         "🛒 Delete Sale",
@@ -639,9 +644,13 @@ elif app_mode == "🔐 Admin Panel":
         daily_summary = pd.merge(
             daily_stock, daily_sales, on="date", how="outer"
         ).fillna(0)
+        daily_summary["Daily Profit (৳)"] = (
+            daily_summary["Revenue Made (৳)"]
+            - daily_summary["Stock-In Spend (৳)"]
+        )
         daily_summary = daily_summary.sort_values(by="date", ascending=False)
 
-        st.markdown("#### 📊 Daily Summary & Earnings Overview")
+        st.markdown("#### 📊 Daily Summary & Profit Breakdown")
         st.dataframe(daily_summary, width="stretch", hide_index=True)
 
         st.markdown("---")
