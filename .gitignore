@@ -1,0 +1,4 @@
+inventory.db
+*.db
+*.xlsx
+__pycache__/
