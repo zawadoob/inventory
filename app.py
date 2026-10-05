@@ -196,7 +196,7 @@ conn = init_db()
 st.markdown("""
     <div class="zoho-header">
         <div>
-            <h1>⚙️ Inventory Management System </h1>
+            <h1>⚙️ Zoho-Style Inventory Management Suite</h1>
             <p>Automated Motor Parts Stock & Sales Operations</p>
         </div>
         <div>
@@ -220,9 +220,7 @@ df_dash = pd.merge(df_items, stock_in_grouped, on="item_id", how="left").fillna(
 )
 df_dash = pd.merge(df_dash, sales_grouped, on="item_id", how="left").fillna(0)
 df_dash.rename(columns={"quantity": "Total Stock In"}, inplace=True)
-
-# Correct Calculation Formula
-df_dash["Current Stock"] = (
+df_dash["Current Balance"] = (
     df_dash["opening_stock"] + df_dash["Total Stock In"]
 ) - df_dash["quantity_sold"]
 
@@ -249,7 +247,7 @@ with col_m3:
 with col_m4:
   st.markdown(
       f"""<div class="metric-card"><div class="metric-title">Net Balance</div><div"
-      f" class="metric-value">{int(df_dash['Current Stock'].sum())}</div></div>""",
+      f" class="metric-value">{int(df_dash['Current Balance'].sum())}</div></div>""",
       unsafe_allow_html=True,
   )
 
@@ -277,26 +275,9 @@ with tab_dash:
       "Opening Stock",
       "Total Stock In",
       "Total Sold",
-      "Current Stock",
+      "Current Balance",
   ]
-  st.dataframe(df_display, use_container_width=True, hide_index=True)
-
-  if st.button("📥 Export Zoho Report (Excel Backup)"):
-    backup_file = "zoho_inventory_report.xlsx"
-    with pd.ExcelWriter(backup_file, engine="openpyxl") as writer:
-      df_display.to_excel(writer, sheet_name="Inventory Dashboard", index=False)
-      pd.read_sql("SELECT * FROM stock_in", conn).to_excel(
-          writer, sheet_name="Stock In Log", index=False
-      )
-      pd.read_sql("SELECT * FROM sales", conn).to_excel(
-          writer, sheet_name="Sales Log", index=False
-      )
-    with open(backup_file, "rb") as f:
-      st.download_button(
-          "Download Generated Report File",
-          f,
-          file_name="Zoho_Inventory_Report.xlsx",
-      )
+  st.dataframe(df_display, width="stretch", hide_index=True)
 
 with tab_sales:
   col_s1, col_s2 = st.columns([1, 2])
@@ -314,33 +295,37 @@ with tab_sales:
       s_submitted = st.form_submit_button("Confirm Sale")
 
       if s_submitted:
-        item_id = s_item.split(" - ")[0]
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT opening_stock FROM items WHERE item_id = ?", (item_id,)
-        )
-        opening = cur.fetchone()[0]
-        cur.execute(
-            "SELECT SUM(quantity) FROM stock_in WHERE item_id = ?", (item_id,)
-        )
-        extra = cur.fetchone()[0] or 0
-        cur.execute(
-            "SELECT SUM(quantity_sold) FROM sales WHERE item_id = ?", (item_id,)
-        )
-        sold = cur.fetchone()[0] or 0
-        bal = (opening + extra) - sold
-
-        if s_qty > bal:
-          st.error(f"❌ Stock Error! Available balance: {bal}")
+        if not s_item:
+          st.error("❌ Please select a valid item.")
         else:
+          item_id = s_item.split(" - ")[0]
+          cur = conn.cursor()
           cur.execute(
-              """INSERT INTO sales (date, invoice_no, item_id, quantity_sold, customer) 
-                         VALUES (?, ?, ?, ?, ?)""",
-              (str(s_date), s_invoice, item_id, s_qty, s_customer),
+              "SELECT opening_stock FROM items WHERE item_id = ?", (item_id,)
           )
-          conn.commit()
-          st.success("✅ Sale recorded successfully!")
-          st.rerun()
+          opening = cur.fetchone()[0]
+          cur.execute(
+              "SELECT SUM(quantity) FROM stock_in WHERE item_id = ?", (item_id,)
+          )
+          extra = cur.fetchone()[0] or 0
+          cur.execute(
+              "SELECT SUM(quantity_sold) FROM sales WHERE item_id = ?",
+              (item_id,),
+          )
+          sold = cur.fetchone()[0] or 0
+          bal = (opening + extra) - sold
+
+          if s_qty > bal:
+            st.error(f"❌ Stock Error! Available balance: {bal}")
+          else:
+            cur.execute(
+                """INSERT INTO sales (date, invoice_no, item_id, quantity_sold, customer) 
+                           VALUES (?, ?, ?, ?, ?)""",
+                (str(s_date), s_invoice, item_id, s_qty, s_customer),
+            )
+            conn.commit()
+            st.success("✅ Sale recorded successfully!")
+            st.rerun()
 
   with col_s2:
     st.markdown(
@@ -369,7 +354,7 @@ with tab_sales:
           "Qty",
           "Customer",
       ]
-      st.dataframe(df_sal_log, use_container_width=True, hide_index=True)
+      st.dataframe(df_sal_log, width="stretch", hide_index=True)
     else:
       st.info("No sales recorded yet.")
 
@@ -391,16 +376,19 @@ with tab_stockin:
       i_submitted = st.form_submit_button("Record Stock In")
 
       if i_submitted:
-        item_id = i_item.split(" - ")[0]
-        cur = conn.cursor()
-        cur.execute(
-            """INSERT INTO stock_in (date, ref_no, item_id, quantity, note) 
-                       VALUES (?, ?, ?, ?, ?)""",
-            (str(i_date), i_ref, item_id, i_qty, i_note),
-        )
-        conn.commit()
-        st.success("✅ Stock added successfully!")
-        st.rerun()
+        if not i_item:
+          st.error("❌ Please select a valid item.")
+        else:
+          item_id = i_item.split(" - ")[0]
+          cur = conn.cursor()
+          cur.execute(
+              """INSERT INTO stock_in (date, ref_no, item_id, quantity, note) 
+                         VALUES (?, ?, ?, ?, ?)""",
+              (str(i_date), i_ref, item_id, i_qty, i_note),
+          )
+          conn.commit()
+          st.success("✅ Stock added successfully!")
+          st.rerun()
 
   with col_i2:
     st.markdown(
@@ -418,6 +406,6 @@ with tab_stockin:
           ["date", "ref_no", "item_id", "item_name", "quantity", "note"]
       ]
       df_stk_log.columns = ["Date", "Challan", "ID", "Item Name", "Qty", "Note"]
-      st.dataframe(df_stk_log, use_container_width=True, hide_index=True)
+      st.dataframe(df_stk_log, width="stretch", hide_index=True)
     else:
       st.info("No stock-in records yet.")
