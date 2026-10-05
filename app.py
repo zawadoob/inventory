@@ -415,12 +415,11 @@ elif app_mode == "📦 Stock-In Operations":
 
 elif app_mode == "🔐 Admin Panel":
   st.markdown(
-      '<div class="section-title">🔐 Restricted Admin Panel (Full CRUD'
-      " Operations)</div>",
+      '<div class="section-title">🔐 Restricted Admin Panel (Full Management'
+      " Suite)</div>",
       unsafe_allow_html=True,
   )
 
-  # Safe password lookup fallback
   try:
     correct_admin_pass = st.secrets["ADMIN_PASSWORD"]
   except Exception:
@@ -431,21 +430,23 @@ elif app_mode == "🔐 Admin Panel":
   if admin_pass == correct_admin_pass:
     st.success("🔓 Admin Authentication Successful")
 
-    admin_sub_tab1, admin_sub_tab2, admin_sub_tab3, admin_sub_tab4 = st.tabs([
-        "👁️ Read / View Catalog",
-        "➕ Create New Part",
-        "✏️ Update Part & Price",
+    admin_sub_tab1, admin_sub_tab2, admin_sub_tab3, admin_sub_tab4, admin_sub_tab5, admin_sub_tab6 = st.tabs([
+        "👁️ View Catalog",
+        "➕ Add Part",
+        "✏️️ Edit Part",
         "🗑️ Delete Part",
+        "📦 Delete Stock-In",
+        "🛒 Delete Sale",
     ])
 
     with admin_sub_tab1:
-      st.markdown("### Complete Inventory Catalog (Read)")
+      st.markdown("### Complete Inventory Catalog")
       full_catalog = pd.read_sql("SELECT * FROM items", conn)
       full_catalog.columns = ["Item ID", "Item Name", "Opening Stock", "Unit Price (৳)"]
       st.dataframe(full_catalog, width="stretch", hide_index=True)
 
     with admin_sub_tab2:
-      st.markdown("### Add New Part to Catalog (Create)")
+      st.markdown("### Create New Part")
       with st.form("create_part_form"):
         new_id = st.text_input("Item ID (e.g., MP-006)")
         new_name = st.text_input("Item Name (e.g., Alternator Belt)")
@@ -477,7 +478,7 @@ elif app_mode == "🔐 Admin Panel":
               )
 
     with admin_sub_tab3:
-      st.markdown("### Update Existing Part Details & Price (Update)")
+      st.markdown("### Update Existing Part Details & Price")
       edit_item_select = st.selectbox(
           "Select Item to Edit", item_options, key="edit_select"
       )
@@ -511,7 +512,7 @@ elif app_mode == "🔐 Admin Panel":
             st.rerun()
 
     with admin_sub_tab4:
-      st.markdown("### Delete Item from Catalog (Delete)")
+      st.markdown("### Delete Item from Catalog")
       del_item_select = st.selectbox(
           "Select Item to Delete", item_options, key="del_select"
       )
@@ -525,8 +526,56 @@ elif app_mode == "🔐 Admin Panel":
           cur = conn.cursor()
           cur.execute("DELETE FROM items WHERE item_id = ?", (del_id,))
           conn.commit()
-          st.success(f"🗑️️ Item {del_id} deleted successfully!")
+          st.success(f"🗑 Item {del_id} deleted successfully!")
           st.rerun()
+
+    with admin_sub_tab5:
+      st.markdown("### Delete Incoming Stock Record")
+      df_stock_full = pd.read_sql(
+          "SELECT id, date, ref_no, item_id, quantity, note FROM stock_in", conn
+      )
+      if not df_stock_full.empty:
+        stock_choices = [
+            f"ID: {row['id']} | Date: {row['date']} | Ref: {row['ref_no']} | Item: {row['item_id']} | Qty: {row['quantity']}"
+            for _, row in df_stock_full.iterrows()
+        ]
+        selected_stock_del = st.selectbox(
+            "Select Stock-In Entry to Remove", stock_choices
+        )
+        if selected_stock_del:
+          stock_row_id = int(selected_stock_del.split(" | ")[0].replace("ID: ", ""))
+          if st.button("Confirm Delete Stock-In Entry", type="primary", key="del_stk_btn"):
+            cur = conn.cursor()
+            cur.execute("DELETE FROM stock_in WHERE id = ?", (stock_row_id,))
+            conn.commit()
+            st.success(f"🗑 Stock-In record ID {stock_row_id} deleted successfully!")
+            st.rerun()
+      else:
+        st.info("No stock-in records available to delete.")
+
+    with admin_sub_tab6:
+      st.markdown("### Delete Sales Transaction Record")
+      df_sales_full = pd.read_sql(
+          "SELECT id, date, invoice_no, item_id, quantity_sold, customer FROM sales", conn
+      )
+      if not df_sales_full.empty:
+        sales_choices = [
+            f"ID: {row['id']} | Date: {row['date']} | Inv: {row['invoice_no']} | Item: {row['item_id']} | Qty: {row['quantity_sold']} | Cust: {row['customer']}"
+            for _, row in df_sales_full.iterrows()
+        ]
+        selected_sale_del = st.selectbox(
+            "Select Sale Entry to Remove", sales_choices
+        )
+        if selected_sale_del:
+          sale_row_id = int(selected_sale_del.split(" | ")[0].replace("ID: ", ""))
+          if st.button("Confirm Delete Sale Entry", type="primary", key="del_sale_btn"):
+            cur = conn.cursor()
+            cur.execute("DELETE FROM sales WHERE id = ?", (sale_row_id,))
+            conn.commit()
+            st.success(f"🗑 Sales record ID {sale_row_id} deleted successfully!")
+            st.rerun()
+      else:
+        st.info("No sales records available to delete.")
 
   elif admin_pass == "":
     st.info("🔒 Please enter the admin password to access CRUD controls.")
