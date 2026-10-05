@@ -344,7 +344,7 @@ with tab_stockin:
           cur.execute(
               """INSERT INTO stock_in (date, ref_no, item_id, quantity, note) 
                          VALUES (?, ?, ?, ?, ?)""",
- gelap         (str(i_date), i_ref, item_id, i_qty, i_note),
+              (str(i_date), i_ref, item_id, i_qty, i_note),
           )
           conn.commit()
           st.success("✅ Stock added successfully!")
