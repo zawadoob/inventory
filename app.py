@@ -97,12 +97,11 @@ def init_db():
         )
     """)
 
-  # Ensure price column exists if upgrading an older DB
   try:
     cursor.execute("ALTER TABLE items ADD COLUMN price REAL DEFAULT 0.0")
     conn.commit()
   except sqlite3.OperationalError:
-    pass  # Column already exists
+    pass
 
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS stock_in (
@@ -126,7 +125,6 @@ def init_db():
     """)
   conn.commit()
 
-  # Seed default motor parts catalog with prices if empty
   cursor.execute("SELECT COUNT(*) FROM items")
   if cursor.fetchone()[0] == 0:
     default_parts = [
@@ -234,7 +232,8 @@ item_options = [
 
 with tab_dash:
   st.markdown(
-      '<div class="section-title">Live Inventory Status, Stock Balance & Pricing</div>',
+      '<div class="section-title">Live Inventory Status, Stock Balance &'
+      " Pricing</div>",
       unsafe_allow_html=True,
   )
   df_display = df_dash[
@@ -324,127 +323,3 @@ with tab_sales:
         if not pd.read_sql("SELECT * FROM sales", conn).empty
         else pd.DataFrame()
     )
-    if not df_sal_log.empty:
-      df_sal_log["Total Amount (৳)"] = (
-          df_sal_log["quantity_sold"] * df_sal_log["price"]
-      )
-      df_sal_log = df_sal_log[
-          [
-              "date",
-              "invoice_no",
-              "item_id",
-              "item_name",
-              "quantity_sold",
-              "price",
-              "Total Amount (৳)",
-              "customer",
-          ]
-      ]
-      df_sal_log.columns = [
-          "Date",
-          "Invoice",
-          "ID",
-          "Item Name",
-          "Qty",
-          "Unit Price",
-          "Total (৳)",
-          "Customer",
-      ]
-      st.dataframe(df_sal_log, width="stretch", hide_index=True)
-    else:
-      st.info("No sales recorded yet.")
-
-with tab_stockin:
-  col_i1, col_i2 = st.columns([1, 2])
-  with col_i1:
-    st.markdown(
-        '<div class="section-title">Add Incoming Stock</div>',
-        unsafe_allow_html=True,
-    )
-    with st.form("stock_form_zoho", clear_on_submit=True):
-      i_date = st.date_input("Date", value=datetime.today(), key="idate")
-      i_ref = st.text_input("Challan/Ref No (e.g., IMP-208)", key="iref")
-      i_item = st.selectbox("Select Part", item_options, key="iitem")
-      i_qty = st.number_input(
-          "Quantity Received", min_value=1, step=1, value=1, key="iqty"
-      )
-      i_note = st.text_input("Supplier/Note", key="inote")
-      i_submitted = st.form_submit_button("Record Stock In")
-
-      if i_submitted:
-        if not i_item:
-          st.error("❌ Please select a valid item.")
-        else:
-          item_id = i_item.split(" - ")[0]
-          cur = conn.cursor()
-          cur.execute(
-              """INSERT INTO stock_in (date, ref_no, item_id, quantity, note) 
-                         VALUES (?, ?, ?, ?, ?)""",
-              (str(i_date), i_ref, item_id, i_qty, i_note),
-          )
-          conn.commit()
-          st.success("✅ Stock added successfully!")
-          st.rerun()
-
-  with col_i2:
-    st.markdown(
-        '<div class="section-title">Stock-In History Log</div>',
-        unsafe_allow_html=True,
-    )
-    df_stk_log = (
-        pd.merge(
-            pd.read_sql("SELECT * FROM stock_in", conn),
-            items_df,
-            on="item_id",
-            how="left",
-        )
-        if not pd.read_sql("SELECT * FROM stock_in", conn).empty
-        else pd.DataFrame()
-    )
-    if not df_stk_log.empty:
-      df_stk_log = df_stk_log[
-          ["date", "ref_no", "item_id", "item_name", "quantity", "note"]
-      ]
-      df_stk_log.columns = ["Date", "Challan", "ID", "Item Name", "Qty", "Note"]
-      st.dataframe(df_stk_log, width="stretch", hide_index=True)
-    else:
-      st.info("No stock-in records yet.")
-
-with tab_admin:
-  st.markdown(
-      '<div class="section-title">🔐 Restricted Admin Panel</div>',
-      unsafe_allow_html=True,
-  )
-  admin_pass = st.text_input("Enter Admin Password", type="password")
-
-  # Default admin password is set to 'admin123' (you can change it here)
-  if admin_pass == "admin123":
-    st.success("🔓 Admin Authentication Successful")
-
-    admin_sub_tab1, admin_sub_tab2, admin_sub_tab3 = st.tabs([
-        "➕ Add New Part",
-        "✏️ Edit Price & Stock",
-        "🗑️ Delete Item",
-    ])
-
-    with admin_sub_tab1:
-      st.markdown("### Add a New Part to Catalog")
-      with st.form("add_new_part_form"):
-        new_id = st.text_input("Item ID (e.g., MP-006)")
-        new_name = st.text_input("Item Name (e.g., Alternator Belt)")
-        new_opening = st.number_input(
-            "Initial Opening Stock", min_value=0, step=1, value=0
-        )
-        new_price = st.number_input(
-            "Unit Price (৳)", min_value=0.0, step=10.0, value=100.0
-        )
-        add_submitted = st.form_submit_button("Add Part to Catalog")
-
-        if add_submitted:
-          if not new_id or not new_name:
-            st.error("❌ Item ID and Name are required.")
-          else:
-            try:
-              cur = conn.cursor()
-              cur.execute(
-                  """
