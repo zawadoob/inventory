@@ -83,7 +83,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- DATABASE SETUP & INITIAL DATA LOADING ---
+# --- DATABASE SETUP & SELF-SEEDING ITEMS ---
 def init_db():
   conn = sqlite3.connect("inventory.db", check_same_thread=False)
   cursor = conn.cursor()
@@ -117,75 +117,22 @@ def init_db():
     """)
   conn.commit()
 
-  excel_path = "inventory_template.xlsx"
-
-  # Populate items if empty
+  # Seed default motor parts catalog if empty (No Excel needed!)
   cursor.execute("SELECT COUNT(*) FROM items")
-  if cursor.fetchone()[0] == 0 and os.path.exists(excel_path):
-    try:
-      df_items = pd.read_excel(excel_path, sheet_name="Inventory Dashboard")
-      for idx, row in df_items.iterrows():
-        if idx >= 3 and pd.notna(row.iloc[0]):
-          item_id = str(row.iloc[0]).strip()
-          item_name = str(row.iloc[1]).strip()
-          opening = int(row.iloc[2]) if pd.notna(row.iloc[2]) else 0
-          if item_id.startswith("MP-"):
-            cursor.execute(
-                "INSERT OR REPLACE INTO items (item_id, item_name,"
-                " opening_stock) VALUES (?, ?, ?)",
-                (item_id, item_name, opening),
-            )
-      conn.commit()
-    except Exception as e:
-      print(e)
-
-  # Populate stock_in if empty
-  cursor.execute("SELECT COUNT(*) FROM stock_in")
-  if cursor.fetchone()[0] == 0 and os.path.exists(excel_path):
-    try:
-      df_stock = pd.read_excel(excel_path, sheet_name="Stock In Log")
-      for idx, row in df_stock.iterrows():
-        if idx >= 3 and pd.notna(row.iloc[2]):
-          date, ref, item_id, qty, note = (
-              str(row.iloc[0])[:10],
-              str(row.iloc[1]),
-              str(row.iloc[2]).strip(),
-              int(row.iloc[3]),
-              str(row.iloc[4]),
-          )
-          if item_id.startswith("MP-"):
-            cursor.execute(
-                """INSERT INTO stock_in (date, ref_no, item_id, quantity, note) 
-                           VALUES (?, ?, ?, ?, ?)""",
-                (date, ref, item_id, qty, note),
-            )
-      conn.commit()
-    except Exception as e:
-      print(e)
-
-  # Populate sales if empty
-  cursor.execute("SELECT COUNT(*) FROM sales")
-  if cursor.fetchone()[0] == 0 and os.path.exists(excel_path):
-    try:
-      df_sales = pd.read_excel(excel_path, sheet_name="Sales Log")
-      for idx, row in df_sales.iterrows():
-        if idx >= 3 and pd.notna(row.iloc[2]):
-          date, inv, item_id, qty, cust = (
-              str(row.iloc[0])[:10],
-              str(row.iloc[1]),
-              str(row.iloc[2]).strip(),
-              int(row.iloc[4]),
-              str(row.iloc[5]),
-          )
-          if item_id.startswith("MP-"):
-            cursor.execute(
-                """INSERT INTO sales (date, invoice_no, item_id, quantity_sold, customer) 
-                           VALUES (?, ?, ?, ?, ?)""",
-                (date, inv, item_id, qty, cust),
-            )
-      conn.commit()
-    except Exception as e:
-      print(e)
+  if cursor.fetchone()[0] == 0:
+    default_parts = [
+        ("MP-001", "V-Belt Standard", 0),
+        ("MP-002", "Heavy Duty Bearing", 0),
+        ("MP-003", "Brake Pad Set", 0),
+        ("MP-004", "Oil Filter Premium", 0),
+        ("MP-005", "Spark Plug Platinum", 0),
+    ]
+    cursor.executemany(
+        "INSERT OR IGNORE INTO items (item_id, item_name, opening_stock) VALUES"
+        " (?, ?, ?)",
+        default_parts,
+    )
+    conn.commit()
 
   return conn
 
@@ -212,8 +159,14 @@ df_sales = pd.read_sql("SELECT item_id, quantity_sold FROM sales", conn)
 
 stock_in_grouped = (
     df_stock_in.groupby("item_id")["quantity"].sum().reset_index()
+    if not df_stock_in.empty
+    else pd.DataFrame(columns=["item_id", "quantity"])
 )
-sales_grouped = df_sales.groupby("item_id")["quantity_sold"].sum().reset_index()
+sales_grouped = (
+    df_sales.groupby("item_id")["quantity_sold"].sum().reset_index()
+    if not df_sales.empty
+    else pd.DataFrame(columns=["item_id", "quantity_sold"])
+)
 
 df_dash = pd.merge(df_items, stock_in_grouped, on="item_id", how="left").fillna(
     0
@@ -332,8 +285,15 @@ with tab_sales:
         '<div class="section-title">Sales History Log</div>',
         unsafe_allow_html=True,
     )
-    df_sal_log = pd.merge(
-        pd.read_sql("SELECT * FROM sales", conn), items_df, on="item_id", how="left"
+    df_sal_log = (
+        pd.merge(
+            pd.read_sql("SELECT * FROM sales", conn),
+            items_df,
+            on="item_id",
+            how="left",
+        )
+        if not pd.read_sql("SELECT * FROM sales", conn).empty
+        else pd.DataFrame()
     )
     if not df_sal_log.empty:
       df_sal_log = df_sal_log[
@@ -384,7 +344,7 @@ with tab_stockin:
           cur.execute(
               """INSERT INTO stock_in (date, ref_no, item_id, quantity, note) 
                          VALUES (?, ?, ?, ?, ?)""",
-              (str(i_date), i_ref, item_id, i_qty, i_note),
+ gelap         (str(i_date), i_ref, item_id, i_qty, i_note),
           )
           conn.commit()
           st.success("✅ Stock added successfully!")
@@ -395,11 +355,15 @@ with tab_stockin:
         '<div class="section-title">Stock-In History Log</div>',
         unsafe_allow_html=True,
     )
-    df_stk_log = pd.merge(
-        pd.read_sql("SELECT * FROM stock_in", conn),
-        items_df,
-        on="item_id",
-        how="left",
+    df_stk_log = (
+        pd.merge(
+            pd.read_sql("SELECT * FROM stock_in", conn),
+            items_df,
+            on="item_id",
+            how="left",
+        )
+        if not pd.read_sql("SELECT * FROM stock_in", conn).empty
+        else pd.DataFrame()
     )
     if not df_stk_log.empty:
       df_stk_log = df_stk_log[
