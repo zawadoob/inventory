@@ -240,7 +240,7 @@ df_dash["Current Balance"] = (
 ) - df_dash["quantity_sold"]
 df_dash["Total Value"] = df_dash["Current Balance"] * df_dash["price"]
 
-# --- STREAMLINED MAIN MENU KPIS (Only Total Products, Stock In, and Sold) ---
+# --- STREAMLINED MAIN MENU KPIS ---
 col_m1, col_m2, col_m3 = st.columns(3)
 with col_m1:
   st.markdown(
@@ -275,7 +275,6 @@ if app_mode == "📊 Inventory Dashboard":
       '<div class="section-title">Live Inventory Status & Stock Balance</div>',
       unsafe_allow_html=True,
   )
-  # Clean public dashboard omitting pricing valuation metrics
   df_display = df_dash[
       [
           "item_id",
@@ -440,8 +439,8 @@ elif app_mode == "📦 Stock-In Operations":
 
 elif app_mode == "🔐 Admin Panel":
   st.markdown(
-      '<div class="section-title">🔐 Restricted Admin Panel (Financials & CRUD'
-      " Suite)</div>",
+      '<div class="section-title">🔐 Restricted Admin Panel (Financials &'
+      " Management Suite)</div>",
       unsafe_allow_html=True,
   )
 
@@ -455,7 +454,6 @@ elif app_mode == "🔐 Admin Panel":
   if admin_pass == correct_admin_pass:
     st.success("🔓 Admin Authentication Successful")
 
-    # Display total inventory asset valuation exclusively inside the secure admin view
     total_inv_val = df_dash["Total Value"].sum()
     st.markdown(
         f"""<div class="metric-card" style="margin-bottom: 1.5rem;"><div"
@@ -464,7 +462,8 @@ elif app_mode == "🔐 Admin Panel":
         unsafe_allow_html=True,
     )
 
-    admin_sub_tab1, admin_sub_tab2, admin_sub_tab3, admin_sub_tab4, admin_sub_tab5, admin_sub_tab6 = st.tabs([
+    admin_sub_tab1, admin_sub_tab2, admin_sub_tab3, admin_sub_tab4, admin_sub_tab5, admin_sub_tab6, admin_sub_tab7 = st.tabs([
+        "📈 Everyday Dashboard",
         "👁️ View Catalog & Pricing",
         "➕ Add Part",
         "✏️ Edit Part",
@@ -474,6 +473,75 @@ elif app_mode == "🔐 Admin Panel":
     ])
 
     with admin_sub_tab1:
+      st.markdown("### 📅 Everyday Transaction Details & Daily Summary")
+      
+      # Load raw stock-in and sales data
+      raw_stock = pd.read_sql("SELECT date, item_id, quantity FROM stock_in", conn)
+      raw_sales = pd.read_sql("SELECT date, item_id, quantity_sold FROM sales", conn)
+
+      if not raw_stock.empty or not raw_sales.empty:
+        # Group stock-in by date
+        daily_stock = (
+            raw_stock.groupby("date")["quantity"].sum().reset_index()
+            if not raw_stock.empty
+            else pd.DataFrame(columns=["date", "quantity"])
+        )
+        daily_stock.rename(columns={"quantity": "Total Stock-In Qty"}, inplace=True)
+
+        # Group sales by date
+        daily_sales = (
+            raw_sales.groupby("date")["quantity_sold"].sum().reset_index()
+            if not raw_sales.empty
+            else pd.DataFrame(columns=["date", "quantity_sold"])
+        )
+        daily_sales.rename(columns={"quantity_sold": "Total Sold Qty"}, inplace=True)
+
+        # Merge daily statistics together by date
+        daily_summary = pd.merge(daily_stock, daily_sales, on="date", how="outer").fillna(0)
+        daily_summary = daily_summary.sort_values(by="date", ascending=False)
+
+        st.markdown("#### 📊 Daily Summary Overview")
+        st.dataframe(daily_summary, width="stretch", hide_index=True)
+
+        st.markdown("---")
+        st.markdown("#### 🔍 Filter Everyday Details by Specific Date")
+        all_dates = sorted(
+            list(set(raw_stock["date"].dropna().tolist() + raw_sales["date"].dropna().tolist())),
+            reverse=True,
+        )
+        if all_dates:
+          selected_date = st.selectbox("Select Date", all_dates)
+          
+          col_d1, col_d2 = st.columns(2)
+          with col_d1:
+            st.markdown(f"**📦 Stock-In Entries on {selected_date}**")
+            sub_stk = pd.read_sql(
+                "SELECT ref_no, item_id, quantity, note FROM stock_in WHERE date = ?",
+                conn,
+                params=(selected_date,),
+            )
+            if not sub_stk.empty:
+              st.dataframe(sub_stk, width="stretch", hide_index=True)
+            else:
+              st.info("No stock-in records for this date.")
+
+          with col_d2:
+            st.markdown(f"**🛒 Sales Entries on {selected_date}**")
+            sub_sal = pd.read_sql(
+                "SELECT invoice_no, item_id, quantity_sold, customer FROM sales WHERE date = ?",
+                conn,
+                params=(selected_date,),
+            )
+            if not sub_sal.empty:
+              st.dataframe(sub_sal, width="stretch", hide_index=True)
+            else:
+              st.info("No sales records for this date.")
+        else:
+          st.info("No dates available.")
+      else:
+        st.info("No daily transactions logged yet.")
+
+    with admin_sub_tab2:
       st.markdown("### Complete Inventory Catalog & Unit Prices")
       full_catalog = pd.read_sql(
           "SELECT item_id, item_name, opening_stock, price FROM items", conn
@@ -486,7 +554,7 @@ elif app_mode == "🔐 Admin Panel":
       ]
       st.dataframe(full_catalog, width="stretch", hide_index=True)
 
-    with admin_sub_tab2:
+    with admin_sub_tab3:
       st.markdown("### Create New Part")
       with st.form("create_part_form"):
         new_id = st.text_input("Item ID (e.g., MP-006)")
@@ -518,7 +586,7 @@ elif app_mode == "🔐 Admin Panel":
                   f"❌ Error: Item ID '{new_id}' already exists in the catalog!"
               )
 
-    with admin_sub_tab3:
+    with admin_sub_tab4:
       st.markdown("### Update Existing Part Details & Price")
       edit_item_select = st.selectbox(
           "Select Item to Edit", item_options, key="edit_select"
@@ -552,7 +620,7 @@ elif app_mode == "🔐 Admin Panel":
             st.success(f"✅ Successfully updated item {selected_id}!")
             st.rerun()
 
-    with admin_sub_tab4:
+    with admin_sub_tab5:
       st.markdown("### Delete Item from Catalog")
       del_item_select = st.selectbox(
           "Select Item to Delete", item_options, key="del_select"
@@ -570,7 +638,7 @@ elif app_mode == "🔐 Admin Panel":
           st.success(f"🗑 Item {del_id} deleted successfully!")
           st.rerun()
 
-    with admin_sub_tab5:
+    with admin_sub_tab6:
       st.markdown("### Delete Incoming Stock Record")
       df_stock_full = pd.read_sql(
           "SELECT id, date, ref_no, item_id, quantity, note FROM stock_in", conn
@@ -594,7 +662,7 @@ elif app_mode == "🔐 Admin Panel":
       else:
         st.info("No stock-in records available to delete.")
 
-    with admin_sub_tab6:
+    with admin_sub_tab7:
       st.markdown("### Delete Sales Transaction Record")
       df_sales_full = pd.read_sql(
           "SELECT id, date, invoice_no, item_id, quantity_sold, customer FROM sales", conn
@@ -619,6 +687,6 @@ elif app_mode == "🔐 Admin Panel":
         st.info("No sales records available to delete.")
 
   elif admin_pass == "":
-    st.info("🔒 Please enter the admin password to access financial records & CRUD controls.")
+    st.info("🔒 Please enter the admin password to access financial records & everyday dashboard.")
   else:
     st.error("❌ Incorrect Admin Password.")
