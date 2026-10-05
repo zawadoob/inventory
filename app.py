@@ -553,7 +553,7 @@ elif app_mode == "🔐 Admin Panel":
     net_profit = total_revenue - total_stock_spent
     total_inv_val = df_dash["Total Value"].sum()
 
-    # Display Financial KPIs in Admin Panel (Revenue, Stock Spent, Profit, Inventory Value)
+    # Display Financial KPIs in Admin Panel
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     with f_col1:
       st.markdown(
@@ -585,8 +585,9 @@ elif app_mode == "🔐 Admin Panel":
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    admin_sub_tab1, admin_sub_tab2, admin_sub_tab3, admin_sub_tab4, admin_sub_tab5, admin_sub_tab6, admin_sub_tab7 = st.tabs([
+    admin_sub_tab1, admin_sub_tab2, admin_sub_tab3, admin_sub_tab4, admin_sub_tab5, admin_sub_tab6, admin_sub_tab7, admin_sub_tab8 = st.tabs([
         "📈 Everyday Dashboard",
+        "📊 Sales & Revenue Charts",
         "👁️ View Catalog & Pricing",
         "➕ Add Part",
         "✏️ Edit Part",
@@ -703,6 +704,23 @@ elif app_mode == "🔐 Admin Panel":
         st.info("No daily transactions logged yet.")
 
     with admin_sub_tab2:
+      st.markdown("### 📈 Visual Sales, Revenue & Volume Analytics")
+      
+      chart_sales_raw = pd.read_sql("SELECT date, quantity_sold, unit_price FROM sales", conn)
+      if not chart_sales_raw.empty:
+        chart_sales_raw["Revenue"] = chart_sales_raw["quantity_sold"] * chart_sales_raw["unit_price"]
+        chart_grouped = chart_sales_raw.groupby("date").agg({"quantity_sold": "sum", "Revenue": "sum"}).reset_index()
+        chart_grouped = chart_grouped.sort_values("date")
+
+        st.markdown("#### 📉 Daily Sales Volume Trend (Units Sold)")
+        st.line_chart(chart_grouped.set_index("date")["quantity_sold"])
+
+        st.markdown("#### 💰 Daily Revenue Growth (৳)")
+        st.bar_chart(chart_grouped.set_index("date")["Revenue"])
+      else:
+        st.info("No sales chart data available yet. Record some sales to populate analytics charts.")
+
+    with admin_sub_tab3:
       st.markdown("### Complete Inventory Catalog & Unit Prices")
       full_catalog = pd.read_sql(
           "SELECT item_id, item_name, opening_stock, price FROM items", conn
@@ -715,7 +733,7 @@ elif app_mode == "🔐 Admin Panel":
       ]
       st.dataframe(full_catalog, width="stretch", hide_index=True)
 
-    with admin_sub_tab3:
+    with admin_sub_tab4:
       st.markdown("### Create New Part")
       with st.form("create_part_form"):
         new_id = st.text_input("Item ID (e.g., MP-006)")
@@ -747,7 +765,7 @@ elif app_mode == "🔐 Admin Panel":
                   f"❌ Error: Item ID '{new_id}' already exists in the catalog!"
               )
 
-    with admin_sub_tab4:
+    with admin_sub_tab5:
       st.markdown("### Update Existing Part Details & Price")
       edit_item_select = st.selectbox(
           "Select Item to Edit", item_options, key="edit_select"
@@ -781,7 +799,7 @@ elif app_mode == "🔐 Admin Panel":
             st.success(f"✅ Successfully updated item {selected_id}!")
             st.rerun()
 
-    with admin_sub_tab5:
+    with admin_sub_tab6:
       st.markdown("### Delete Item from Catalog")
       del_item_select = st.selectbox(
           "Select Item to Delete", item_options, key="del_select"
@@ -799,7 +817,7 @@ elif app_mode == "🔐 Admin Panel":
           st.success(f"🗑 Item {del_id} deleted successfully!")
           st.rerun()
 
-    with admin_sub_tab6:
+    with admin_sub_tab7:
       st.markdown("### Delete Incoming Stock Record")
       df_stock_full = pd.read_sql(
           "SELECT id, date, ref_no, item_id, quantity, unit_cost, note FROM"
@@ -833,7 +851,7 @@ elif app_mode == "🔐 Admin Panel":
       else:
         st.info("No stock-in records available to delete.")
 
-    with admin_sub_tab7:
+    with admin_sub_tab8:
       st.markdown("### Delete Sales Transaction Record")
       df_sales_full = pd.read_sql(
           "SELECT id, date, invoice_no, item_id, quantity_sold, unit_price,"
@@ -868,7 +886,7 @@ elif app_mode == "🔐 Admin Panel":
   elif admin_pass == "":
     st.info(
         "🔒 Please enter the admin password to access financial records &"
-        " everyday dashboard."
+        " analytics."
     )
   else:
     st.error("❌ Incorrect Admin Password.")
